@@ -1,37 +1,36 @@
+const admin = require("../utils/firebaseAdmin");
 const User = require("../models/user");
 const jwt = require("jsonwebtoken");
 
-exports.phoneLogin = async (req, res) => {
+exports.verifyFirebaseUser = async (req, res) => {
   try {
-    const { phone, name } = req.body;
+    const { token } = req.body;
 
-    if (!phone) {
-      return res.status(400).json({ message: "Phone required" });
-    }
+    const decoded = await admin.auth().verifyIdToken(token);
+
+    const phone = decoded.phone_number;
 
     let user = await User.findOne({ phone });
 
     if (!user) {
       user = await User.create({
-        name,
-        phone
+        phone,
+        walletBalance: 0
       });
     }
 
-    const token = jwt.sign(
+    const appToken = jwt.sign(
       { id: user._id },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
 
     res.json({
-      token,
+      token: appToken,
       user
     });
 
-  } catch (error) {
-    res.status(500).json({
-      message: "Login failed"
-    });
+  } catch (err) {
+    res.status(401).json({ message: "Invalid token" });
   }
 };
