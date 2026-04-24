@@ -1,9 +1,9 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
-const Game = require("./gameEngine");
+const Game = require("./game/gameEngine");
 const User = require("./models/user");
 const Bet = require("./models/Bet");
-
+const engine = require("./game/gameEngine");
 module.exports = function(server) {
   const io = new Server(server, {
     cors: {
