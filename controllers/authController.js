@@ -1,4 +1,3 @@
-const admin = require("../utils/firebaseAdmin");
 const User = require("../models/user");
 const jwt = require("jsonwebtoken");
 
@@ -25,10 +24,7 @@ exports.verifyFirebaseUser = async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    res.json({
-      token: appToken,
-      user
-    });
+    res.json({ token: appToken, user });
 
   } catch (err) {
     res.status(401).json({ message: "Invalid token" });

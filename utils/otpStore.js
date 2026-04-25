@@ -1,12 +1,15 @@
 const otpStore = new Map();
 
+// ================= SAVE OTP =================
 exports.saveOTP = (phone, code) => {
   otpStore.set(phone, {
     code,
-    expires: Date.now() + 5 * 60 * 1000
+    expires: Date.now() + 5 * 60 * 1000,
+    lastSent: Date.now()
   });
 };
 
+// ================= VERIFY OTP =================
 exports.verifyOTP = (phone, code) => {
   const data = otpStore.get(phone);
 
@@ -23,6 +26,7 @@ exports.verifyOTP = (phone, code) => {
   return true;
 };
 
-
-
-
+// optional anti-spam helper
+exports.getLastSent = (phone) => {
+  return otpStore.get(phone)?.lastSent;
+};

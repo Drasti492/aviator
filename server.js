@@ -23,11 +23,13 @@ mongoose.connect(process.env.MONGO_URI)
     console.error("❌ MongoDB ERROR:", err.message);
     process.exit(1);
   });
-// SERVER
+
 const server = http.createServer(app);
 
 // SOCKET
 socketInit(server);
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log("🚀 Server running on " + PORT));
+server.listen(PORT, () => {
+  console.log("🚀 Server running on " + PORT);
+});

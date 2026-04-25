@@ -11,34 +11,41 @@ const otpStore = new Map();
 
 
 
-router.post("/send-otp", async (req, res) => {
+exports.sendOtp = async (req, res) => {
   try {
-    let { phone } = req.body;
+    const { phone } = req.body;
 
-    if (!phone) return res.status(400).json({ message: "Phone required" });
+    if (!phone) {
+      return res.status(400).json({ message: "Phone required" });
+    }
 
-    phone = phone.replace(/\s/g, "");
+    // 🔥 CHECK SPAM (ADD THIS HERE)
+    const lastRequest = otpStore.get(phone)?.lastSent;
+
+    if (lastRequest && Date.now() - lastRequest < 30000) {
+      return res.status(429).json({
+        message: "Wait 30 seconds before retrying"
+      });
+    }
 
     const otp = Math.floor(100000 + Math.random() * 900000);
 
+    // 👉 SAVE STORE (THIS IS WHERE YOU UPDATE IT)
     otpStore.set(phone, {
       otp,
-      expires: Date.now() + 5 * 60 * 1000
+      expires: Date.now() + 5 * 60 * 1000,
+      lastSent: Date.now()
     });
 
-    console.log(`📲 OTP for ${phone} is ${otp}`);
+    // send SMS here (Africa's Talking)
 
-    // IMPORTANT
-    await sendOTP(phone, otp);
-
-    res.json({ success: true });
+    return res.json({ message: "OTP sent" });
 
   } catch (err) {
-    console.error("SEND OTP ERROR:", err.response?.data || err.message);
-    res.status(500).json({ message: "Failed to send OTP" });
+    console.log(err);
+    res.status(500).json({ message: "Server error" });
   }
-});
-
+};
 
 // VERIFY OTP
 
