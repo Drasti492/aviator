@@ -1,26 +1,25 @@
-const AfricasTalking = require("africastalking");
+const axios = require("axios");
 
-const africastalking = AfricasTalking({
-  apiKey: process.env.AT_API_KEY,
-  username: process.env.AT_USERNAME
-});
-
-const sms = africastalking.SMS;
-
-async function sendOTP(phone, otp) {
+exports.sendOTP = async (phone, otp) => {
   try {
-    const result = await sms.send({
-      to: [phone],
-      message: `Your Aviator OTP is: ${otp}. It expires in 5 minutes.`,
-      from: process.env.AT_SENDER_ID
-    });
+    const response = await axios.post(
+      "https://api.africastalking.com/version1/messaging",
+      new URLSearchParams({
+        username: process.env.AT_USERNAME,
+        to: phone,
+        message: `Your Aviator OTP is ${otp}`
+      }),
+      {
+        headers: {
+          apiKey: process.env.AT_API_KEY,
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
+      }
+    );
 
-    console.log("📩 SMS SENT:", result);
-    return result;
+    return response.data;
   } catch (err) {
-    console.error("❌ SMS ERROR:", err.response?.data || err.message);
-    throw err;
+    console.error("SMS ERROR:", err.response?.data || err.message);
+    throw new Error("SMS sending failed");
   }
-}
-
-module.exports = { sendOTP };
+};

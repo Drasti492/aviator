@@ -15,11 +15,8 @@ router.post("/send-otp", async (req, res) => {
   try {
     let { phone } = req.body;
 
-    if (!phone) {
-      return res.status(400).json({ message: "Phone required" });
-    }
+    if (!phone) return res.status(400).json({ message: "Phone required" });
 
-    // normalize (your format already +254...)
     phone = phone.replace(/\s/g, "");
 
     const otp = Math.floor(100000 + Math.random() * 900000);
@@ -31,18 +28,17 @@ router.post("/send-otp", async (req, res) => {
 
     console.log(`📲 OTP for ${phone} is ${otp}`);
 
+    // IMPORTANT
     await sendOTP(phone, otp);
 
-    res.json({
-      success: true,
-      message: "OTP sent"
-    });
+    res.json({ success: true });
 
   } catch (err) {
-    console.error(err);
+    console.error("SEND OTP ERROR:", err.response?.data || err.message);
     res.status(500).json({ message: "Failed to send OTP" });
   }
 });
+
 
 // VERIFY OTP
 
