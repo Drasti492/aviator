@@ -1,7 +1,6 @@
 const router = require("express").Router();
 const User = require("../models/user");
 const jwt = require("jsonwebtoken");
-
 const { saveOTP, verifyOTP } = require("../utils/otpStore");
 
 // =======================
@@ -15,32 +14,32 @@ router.post("/send-otp", async (req, res) => {
       return res.status(400).json({ message: "Phone required" });
     }
 
-    // 🔢 Generate 6-digit OTP
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 💾 Save
     saveOTP(phone, code);
 
-    console.log("📲 OTP for", phone, "is", code); // TEMP
-
-    // 👉 Later: send SMS here
+    console.log("📲 OTP for", phone, "is", code);
 
     res.json({ success: true });
 
   } catch (err) {
+    console.error("❌ SEND OTP ERROR:", err);
     res.status(500).json({ message: "OTP send failed" });
   }
 });
 
-
 // =======================
-// VERIFY OTP + LOGIN
+// VERIFY OTP
 // =======================
 router.post("/verify-otp", async (req, res) => {
   try {
     const { phone, code, name } = req.body;
 
-    if (!verifyOTP(phone, code)) {
+    console.log("🔐 VERIFY REQUEST:", phone, code); // 🔥 MUST APPEAR
+
+    const isValid = verifyOTP(phone, code);
+
+    if (!isValid) {
       return res.status(400).json({ message: "Invalid OTP" });
     }
 
@@ -49,7 +48,8 @@ router.post("/verify-otp", async (req, res) => {
     if (!user) {
       user = await User.create({
         phone,
-        name: name || "User"
+        name: name || "User",
+        walletBalance: 0
       });
     }
 
@@ -65,6 +65,7 @@ router.post("/verify-otp", async (req, res) => {
     });
 
   } catch (err) {
+    console.error(" VERIFY ERROR:", err); // THIS WILL SHOW REAL ERROR
     res.status(500).json({ message: "Verification failed" });
   }
 });
