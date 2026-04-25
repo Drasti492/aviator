@@ -12,16 +12,18 @@ class RoundEngine {
 
     this.players = {};
 
-    this.loop();
+    this.startLoop();
   }
 
-  loop() {
+  // ================= LOOP =================
+  startLoop() {
     setInterval(() => this.tick(), 100);
   }
 
+  // ================= MAIN TICK =================
   tick() {
 
-    // ================= WAITING =================
+    // ---------------- WAITING ----------------
     if (this.state === "WAITING") {
       this.countdown--;
 
@@ -36,10 +38,15 @@ class RoundEngine {
       return;
     }
 
-    // ================= FLYING =================
+    // ---------------- FLYING ----------------
     if (this.state === "FLYING") {
 
-      this.multiplier += 0.02 + this.multiplier * 0.003;
+      this.multiplier += 0.015 + this.multiplier * 0.0025;
+
+      // safety clamp
+      if (!isFinite(this.multiplier)) {
+        this.multiplier = 1;
+      }
 
       this.io.emit("game_tick", {
         multiplier: this.multiplier
@@ -66,7 +73,12 @@ class RoundEngine {
   startRound() {
     this.state = "FLYING";
     this.multiplier = 1;
+
     this.crashPoint = engine.generateCrashPoint();
+
+    if (!this.crashPoint || this.crashPoint < 1.2) {
+      this.crashPoint = 1.5;
+    }
 
     this.io.emit("round_start");
   }
@@ -79,7 +91,7 @@ class RoundEngine {
       crashPoint: this.crashPoint
     });
 
-    // mark losses
+    // mark losers
     for (let id in this.players) {
       const p = this.players[id];
 
@@ -91,13 +103,16 @@ class RoundEngine {
       }
     }
 
-    // reset AFTER crash delay
+    // RESET ROUND AFTER DELAY
     setTimeout(() => {
       this.players = {};
       this.countdown = 10;
+      this.multiplier = 1;
       this.state = "WAITING";
 
-      this.io.emit("round_waiting", { countdown: this.countdown });
+      this.io.emit("round_waiting", {
+        countdown: this.countdown
+      });
     }, 10000);
   }
 
@@ -108,7 +123,8 @@ class RoundEngine {
     }
 
     this.players[socketId] = {
-      ...betData,
+      amount: Number(betData.amount),
+      autoCashout: Number(betData.autoCashout),
       cashed: false
     };
 

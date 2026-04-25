@@ -6,27 +6,22 @@ const Transaction = require("../models/transaction");
 // ================= STK PUSH =================
 exports.stkPush = async (req, res) => {
   try {
-    let { phone, amount } = req.body;
+    const { phone, amount } = req.body;
 
-    amount = Math.floor(Number(amount));
-
-    if (!phone || !amount || amount < 100) {
-      return res.status(400).json({
-        message: "Minimum deposit is 100"
-      });
+    if (!phone) return res.status(400).json({ message: "Phone required" });
+    if (!amount || amount < 100) {
+      return res.status(400).json({ message: "Minimum deposit is 100 KES" });
     }
 
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    const reference = "DEP" + Date.now();
+    const reference = "DEP_" + Date.now();
 
-    await Payment.create({
+    const payment = await Payment.create({
       user: user._id,
       phone,
-      amount,
+      amount: Math.floor(amount),
       type: "deposit",
       reference,
       status: "pending"
@@ -35,7 +30,7 @@ exports.stkPush = async (req, res) => {
     const response = await axios.post(
       `${process.env.PAYHERO_BASE_URL}/api/v2/payments`,
       {
-        amount,
+        amount: Math.floor(amount),
         phone_number: phone,
         provider: "m-pesa",
         channel_id: Number(process.env.PAYHERO_CHANNEL_ID),
@@ -51,14 +46,15 @@ exports.stkPush = async (req, res) => {
       }
     );
 
-    res.json({
+    return res.json({
+      success: true,
       reference,
-      checkoutUrl: response.data.checkout_url
+      checkoutUrl: response.data?.checkout_url || null
     });
 
   } catch (err) {
     console.error("STK ERROR:", err.response?.data || err.message);
-    res.status(500).json({ message: "STK failed" });
+    return res.status(500).json({ message: "STK failed" });
   }
 };
 
@@ -71,13 +67,9 @@ exports.payheroCallback = async (req, res) => {
     if (!ref) return res.sendStatus(400);
 
     const payment = await Payment.findOne({ reference: ref }).populate("user");
-
     if (!payment) return res.sendStatus(404);
 
-    // 🚨 IDENTITY GUARD (prevents double credit)
-    if (payment.status === "success") {
-      return res.sendStatus(200);
-    }
+    if (payment.status !== "pending") return res.sendStatus(200);
 
     if (code === 0) {
       payment.status = "success";
@@ -85,16 +77,10 @@ exports.payheroCallback = async (req, res) => {
 
       const user = payment.user;
 
-      // ✅ ATOMIC SAFE UPDATE
-      const updatedUser = await User.findByIdAndUpdate(
-        user._id,
-        {
-          $inc: {
-            walletBalance: Math.floor(payment.amount)
-          }
-        },
-        { new: true }
-      );
+      user.walletBalance =
+        Math.floor((user.walletBalance || 0) + payment.amount);
+
+      await user.save();
 
       await Transaction.create({
         user: user._id,
@@ -102,18 +88,15 @@ exports.payheroCallback = async (req, res) => {
         type: "deposit",
         status: "completed"
       });
-
-      console.log("💰 Wallet updated:", updatedUser.walletBalance);
-
     } else {
       payment.status = "failed";
       await payment.save();
     }
 
-    res.sendStatus(200);
+    return res.sendStatus(200);
 
   } catch (err) {
     console.error("CALLBACK ERROR:", err);
-    res.sendStatus(500);
+    return res.sendStatus(500);
   }
 };
