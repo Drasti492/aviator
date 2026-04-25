@@ -1,17 +1,15 @@
 const express = require("express");
 const router = express.Router();
 
-const {
-  stkPush,
-  payheroCallback
-} = require("../controllers/paymentController");
-
+const paymentController = require("../controllers/paymentController");
 const auth = require("../middleware/auth");
 
-// STK PUSH
-router.post("/stk-push", auth, stkPush);
+// DEBUG SAFE CHECK
+if (!paymentController.stkPush || !paymentController.payheroCallback) {
+  throw new Error("Payment controller exports missing");
+}
 
-// CALLBACK (NO auth here!)
-router.post("/callback", payheroCallback);
+router.post("/stk-push", auth, paymentController.stkPush);
+router.post("/callback", paymentController.payheroCallback);
 
 module.exports = router;

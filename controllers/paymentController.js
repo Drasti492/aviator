@@ -4,13 +4,13 @@ const Payment = require("../models/Payment");
 const Transaction = require("../models/transaction");
 
 // ================= STK PUSH =================
-exports.stkPush = async (req, res) => {
+const stkPush = async (req, res) => {
   try {
     const { phone, amount } = req.body;
 
     if (!phone) return res.status(400).json({ message: "Phone required" });
     if (!amount || amount < 100) {
-      return res.status(400).json({ message: "Minimum deposit is 100 KES" });
+      return res.status(400).json({ message: "Minimum deposit is 100" });
     }
 
     const user = await User.findById(req.user.id);
@@ -18,7 +18,7 @@ exports.stkPush = async (req, res) => {
 
     const reference = "DEP_" + Date.now();
 
-    const payment = await Payment.create({
+    await Payment.create({
       user: user._id,
       phone,
       amount: Math.floor(amount),
@@ -46,20 +46,20 @@ exports.stkPush = async (req, res) => {
       }
     );
 
-    return res.json({
+    res.json({
       success: true,
       reference,
-      checkoutUrl: response.data?.checkout_url || null
+      checkoutUrl: response.data?.checkout_url
     });
 
   } catch (err) {
     console.error("STK ERROR:", err.response?.data || err.message);
-    return res.status(500).json({ message: "STK failed" });
+    res.status(500).json({ message: "STK failed" });
   }
 };
 
 // ================= CALLBACK =================
-exports.payheroCallback = async (req, res) => {
+const payheroCallback = async (req, res) => {
   try {
     const ref = req.body?.response?.ExternalReference;
     const code = req.body?.response?.ResultCode;
@@ -93,10 +93,16 @@ exports.payheroCallback = async (req, res) => {
       await payment.save();
     }
 
-    return res.sendStatus(200);
+    res.sendStatus(200);
 
   } catch (err) {
     console.error("CALLBACK ERROR:", err);
-    return res.sendStatus(500);
+    res.sendStatus(500);
   }
+};
+
+// ================= EXPORTS (VERY IMPORTANT) =================
+module.exports = {
+  stkPush,
+  payheroCallback
 };
