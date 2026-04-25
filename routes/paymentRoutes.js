@@ -7,15 +7,12 @@ const {
   paymentStatus
 } = require("../controllers/paymentController");
 
-// ================= ROUTES =================
+if (!stkPush || !payheroCallback || !paymentStatus) {
+  throw new Error("Payment controller exports missing");
+}
 
-// deposit
 router.post("/stk-push", auth, stkPush);
-
-// callback (NO AUTH)
 router.post("/payhero-callback", payheroCallback);
-
-// status check
 router.get("/status/:reference", auth, paymentStatus);
 
 module.exports = router;
