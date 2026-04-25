@@ -1,23 +1,47 @@
 const router = require("express").Router();
-const admin = require("../utils/firebaseAdmin");
 const User = require("../models/user");
 const jwt = require("jsonwebtoken");
 
-// ✅ ONLY AUTH ENDPOINT (FIXED)
-router.post("/phone-login", async (req, res) => {
+const { saveOTP, verifyOTP } = require("../utils/otpStore");
+
+// =======================
+// SEND OTP
+// =======================
+router.post("/send-otp", async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1];
-
-    if (!token) {
-      return res.status(401).json({ message: "No Firebase token" });
-    }
-
-    const decoded = await admin.auth().verifyIdToken(token);
-
-    const phone = decoded.phone_number;
+    const { phone } = req.body;
 
     if (!phone) {
-      return res.status(400).json({ message: "No phone from Firebase" });
+      return res.status(400).json({ message: "Phone required" });
+    }
+
+    // 🔢 Generate 6-digit OTP
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // 💾 Save
+    saveOTP(phone, code);
+
+    console.log("📲 OTP for", phone, "is", code); // TEMP
+
+    // 👉 Later: send SMS here
+
+    res.json({ success: true });
+
+  } catch (err) {
+    res.status(500).json({ message: "OTP send failed" });
+  }
+});
+
+
+// =======================
+// VERIFY OTP + LOGIN
+// =======================
+router.post("/verify-otp", async (req, res) => {
+  try {
+    const { phone, code, name } = req.body;
+
+    if (!verifyOTP(phone, code)) {
+      return res.status(400).json({ message: "Invalid OTP" });
     }
 
     let user = await User.findOne({ phone });
@@ -25,25 +49,23 @@ router.post("/phone-login", async (req, res) => {
     if (!user) {
       user = await User.create({
         phone,
-        name: req.body.name || "User",
-        walletBalance: 0
+        name: name || "User"
       });
     }
 
-    const appToken = jwt.sign(
-      { id: user._id, phone: user.phone },
+    const token = jwt.sign(
+      { id: user._id, phone },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
 
     res.json({
-      token: appToken,
+      token,
       user
     });
 
   } catch (err) {
-    console.log(err);
-    res.status(401).json({ message: "Firebase verification failed" });
+    res.status(500).json({ message: "Verification failed" });
   }
 });
 
