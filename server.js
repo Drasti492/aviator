@@ -17,9 +17,15 @@ app.use("/api/wallet", require("./routes/walletRoutes"));
 app.use("/api/payment", require("./routes/paymentRoutes"));
 
 // DB
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB connected"))
-  .catch(err => console.log(err));
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => console.log("✅ MongoDB connected"))
+.catch(err => {
+  console.error("❌ MongoDB ERROR:", err.message);
+  process.exit(1); // stop server if DB fails
+});
 
 // SERVER
 const server = http.createServer(app);
