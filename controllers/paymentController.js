@@ -6,15 +6,20 @@ const Transaction = require("../models/transaction");
 // ================= STK PUSH =================
 exports.stkPush = async (req, res) => {
   try {
-    const { phone, amount } = req.body;
+    let { phone, amount } = req.body;
 
-    if (!phone || amount < 100) {
+    amount = Math.floor(Number(amount));
+
+    if (!phone || !amount || amount < 100) {
       return res.status(400).json({
         message: "Minimum deposit is 100"
       });
     }
 
     const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
     const reference = "DEP" + Date.now();
 
@@ -36,7 +41,7 @@ exports.stkPush = async (req, res) => {
         channel_id: Number(process.env.PAYHERO_CHANNEL_ID),
         external_reference: reference,
         callback_url: process.env.PAYHERO_CALLBACK_URL,
-        customer_name: "Aviator User"
+        customer_name: user.name || "Aviator User"
       },
       {
         headers: {
@@ -66,18 +71,30 @@ exports.payheroCallback = async (req, res) => {
     if (!ref) return res.sendStatus(400);
 
     const payment = await Payment.findOne({ reference: ref }).populate("user");
+
     if (!payment) return res.sendStatus(404);
 
-    if (payment.status !== "pending") return res.sendStatus(200);
+    // 🚨 IDENTITY GUARD (prevents double credit)
+    if (payment.status === "success") {
+      return res.sendStatus(200);
+    }
 
     if (code === 0) {
       payment.status = "success";
       await payment.save();
 
       const user = payment.user;
-      user.walletBalance += payment.amount;
-      user.walletBalance = Math.floor(user.walletBalance); // NO decimals
-      await user.save();
+
+      // ✅ ATOMIC SAFE UPDATE
+      const updatedUser = await User.findByIdAndUpdate(
+        user._id,
+        {
+          $inc: {
+            walletBalance: Math.floor(payment.amount)
+          }
+        },
+        { new: true }
+      );
 
       await Transaction.create({
         user: user._id,
@@ -85,6 +102,8 @@ exports.payheroCallback = async (req, res) => {
         type: "deposit",
         status: "completed"
       });
+
+      console.log("💰 Wallet updated:", updatedUser.walletBalance);
 
     } else {
       payment.status = "failed";

@@ -25,20 +25,24 @@ module.exports = function (server) {
 
   io.on("connection", (socket) => {
 
-    socket.on("place_bet", (data) => {
-      if (!socket.user) return socket.emit("error_msg", "Login required");
+   socket.on("place_bet", (data) => {
+  if (!socket.user) {
+    return socket.emit("error_msg", "Login required");
+  }
 
-      const ok = game.addBet(socket.id, {
-        amount: data.amount,
-        autoCashout: data.autoCashout
-      });
+  const ok = game.addBet(socket.id, {
+    amount: Number(data.amount),
+    autoCashout: Number(data.autoCashout)
+  });
 
-      if (!ok) {
-        return socket.emit("error_msg", "Wait for next round");
-      }
+  if (!ok) {
+    return socket.emit("error_msg", "Wait for next round");
+  }
 
-      socket.emit("bet_placed", { amount: data.amount });
-    });
+  socket.emit("bet_placed", {
+    amount: data.amount
+  });
+});
 
     socket.on("cashout", () => {
       game.cashout(socket);
