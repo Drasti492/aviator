@@ -2,55 +2,75 @@ const router = require("express").Router();
 const User = require("../models/user");
 const jwt = require("jsonwebtoken");
 const { saveOTP, verifyOTP } = require("../utils/otpStore");
-
+const { sendOTP } = require("../utils/smsService");
 // =======================
 // SEND OTP
 // =======================
+
+const otpStore = new Map();
+
+
+
 router.post("/send-otp", async (req, res) => {
   try {
-    const { phone } = req.body;
+    let { phone } = req.body;
 
     if (!phone) {
       return res.status(400).json({ message: "Phone required" });
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // normalize (your format already +254...)
+    phone = phone.replace(/\s/g, "");
 
-    saveOTP(phone, code);
+    const otp = Math.floor(100000 + Math.random() * 900000);
 
-    console.log("📲 OTP for", phone, "is", code);
+    otpStore.set(phone, {
+      otp,
+      expires: Date.now() + 5 * 60 * 1000
+    });
 
-    res.json({ success: true });
+    console.log(`📲 OTP for ${phone} is ${otp}`);
+
+    await sendOTP(phone, otp);
+
+    res.json({
+      success: true,
+      message: "OTP sent"
+    });
 
   } catch (err) {
-    console.error("❌ SEND OTP ERROR:", err);
-    res.status(500).json({ message: "OTP send failed" });
+    console.error(err);
+    res.status(500).json({ message: "Failed to send OTP" });
   }
 });
 
-// =======================
 // VERIFY OTP
-// =======================
+
 router.post("/verify-otp", async (req, res) => {
   try {
-    const { phone, code, name } = req.body;
+    const { phone, otp } = req.body;
 
-    console.log("🔐 VERIFY REQUEST:", phone, code); // 🔥 MUST APPEAR
+    const record = otpStore.get(phone);
 
-    const isValid = verifyOTP(phone, code);
+    if (!record) {
+      return res.status(400).json({ message: "OTP expired or not found" });
+    }
 
-    if (!isValid) {
+    if (Date.now() > record.expires) {
+      otpStore.delete(phone);
+      return res.status(400).json({ message: "OTP expired" });
+    }
+
+    if (Number(otp) !== record.otp) {
       return res.status(400).json({ message: "Invalid OTP" });
     }
+
+    otpStore.delete(phone);
 
     let user = await User.findOne({ phone });
 
     if (!user) {
-      user = await User.create({
-        phone,
-        name: name || "User",
-        walletBalance: 0
-      });
+      user = await User.create({ phone });
     }
 
     const token = jwt.sign(
@@ -60,12 +80,13 @@ router.post("/verify-otp", async (req, res) => {
     );
 
     res.json({
+      success: true,
       token,
       user
     });
 
   } catch (err) {
-    console.error(" VERIFY ERROR:", err); // THIS WILL SHOW REAL ERROR
+    console.error("VERIFY ERROR:", err);
     res.status(500).json({ message: "Verification failed" });
   }
 });
