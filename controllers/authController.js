@@ -7,16 +7,38 @@ exports.sendOtp = async (req, res) => {
   try {
     const { phone } = req.body;
 
+    let user = await User.findOne({ phone });
+
+    if (!user) {
+      user = await User.create({ phone, pin: "0000" }); // temp
+    }
+
+    // 🚫 OTP LIMIT: 3 PER 3 HOURS
+    if (user.otpAttempts >= 3 && user.otpExpires && user.otpExpires > Date.now()) {
+      return res.status(429).json({
+        message: "Too many OTP requests. Try again later."
+      });
+    }
+
+    // RESET if expired
+    if (!user.otpExpires || user.otpExpires < Date.now()) {
+      user.otpAttempts = 0;
+    }
+
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
     saveOTP(phone, code);
 
-    console.log("OTP:", code); // replace with SMS
+    user.otpAttempts += 1;
+    user.otpExpires = Date.now() + (3 * 60 * 60 * 1000); // 3hrs
+    await user.save();
+
+    console.log("OTP:", code);
 
     res.json({ message: "OTP sent" });
 
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    res.status(500).json({ message: err.message });
   }
 };
 
@@ -37,68 +59,64 @@ exports.register = async (req, res) => {
 
     if (!user) {
       user = await User.create({ phone, name, pin });
+    } else {
+      user.name = name;
+      user.pin = pin;
+      await user.save();
     }
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
 
     res.json({ token, user });
 
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Register failed" });
   }
 };
 
 // ================= LOGIN =================
 exports.login = async (req, res) => {
-  const { phone, pin } = req.body;
-
-  const user = await User.findOne({ phone });
-
-  if (!user || user.pin !== pin) {
-    return res.status(400).json({ message: "Invalid credentials" });
-  }
-
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
-
-  res.json({ token, user });
-};
-
-// ================= FORGOT PASSWORD =================
-exports.forgotPassword = async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone, pin } = req.body;
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const user = await User.findOne({ phone });
 
-    saveOTP(phone, code);
+    if (!user || user.pin !== pin) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
 
-    console.log("RESET OTP:", code);
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
 
-    res.json({ message: "Reset OTP sent" });
+    res.json({ token, user });
 
-  } catch (err) {
-    res.status(400).json({ message: err.message });
+  } catch {
+    res.status(500).json({ message: "Login failed" });
   }
 };
 
-// ================= RESET PIN =================
+// ================= RESET PASSWORD =================
 exports.resetPin = async (req, res) => {
-  const { phone, otp, newPin } = req.body;
+  try {
+    const { phone, otp, newPin } = req.body;
 
-  if (!verifyOTP(phone, otp)) {
-    return res.status(400).json({ message: "Invalid OTP" });
+    if (!verifyOTP(phone, otp)) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+
+    if (!newPin || newPin.length !== 4) {
+      return res.status(400).json({ message: "PIN must be 4 digits" });
+    }
+
+    const user = await User.findOne({ phone });
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    user.pin = newPin;
+    await user.save();
+
+    res.json({ message: "PIN reset successful" });
+
+  } catch {
+    res.status(500).json({ message: "Reset failed" });
   }
-
-  if (!newPin || newPin.length !== 4) {
-    return res.status(400).json({ message: "PIN must be 4 digits" });
-  }
-
-  const user = await User.findOne({ phone });
-
-  if (!user) return res.status(404).json({ message: "User not found" });
-
-  user.pin = newPin;
-  await user.save();
-
-  res.json({ message: "PIN reset successful" });
 };
