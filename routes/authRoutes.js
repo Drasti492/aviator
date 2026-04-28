@@ -1,10 +1,15 @@
 const router = require("express").Router();
-const ctrl = require("../controllers/authController");
+const auth = require("../controllers/authController");
 
-router.post("/send-otp", ctrl.sendOtp);
-router.post("/verify-signup", ctrl.verifySignup);
-router.post("/login", ctrl.login);
-router.post("/request-reset", ctrl.requestReset);
-router.post("/reset-pin", ctrl.resetPin);
+// ================= OTP =================
+router.post("/send-otp", auth.sendOtp);
+router.post("/verify-otp", auth.register);
+
+// ================= LOGIN =================
+router.post("/login", auth.login);
+
+// ================= PASSWORD RESET =================
+router.post("/forgot-password", auth.forgotPassword);
+router.post("/reset-pin", auth.resetPin);
 
 module.exports = router;
