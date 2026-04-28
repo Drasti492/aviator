@@ -1,41 +1,53 @@
 const User = require("../models/user");
 const Transaction = require("../models/transaction");
 
-// GET WALLET
+// ================= GET WALLET =================
 exports.getWallet = async (req, res) => {
   const user = await User.findById(req.user.id);
-  res.json({ walletBalance: user.walletBalance });
-};
 
-// DEPOSIT (simple mock for now)
-exports.deposit = async (req, res) => {
-  const { amount } = req.body;
-
-  await User.findByIdAndUpdate(req.user.id, {
-    $inc: { walletBalance: amount }
+  res.json({
+    walletBalance: Math.floor(user.walletBalance)
   });
-
-  res.json({ success: true });
 };
 
-// WITHDRAW
+// ================= WITHDRAW =================
 exports.withdraw = async (req, res) => {
-  const { amount } = req.body;
+  try {
+    const { amount } = req.body;
 
-  const user = await User.findById(req.user.id);
+    if (!amount || amount < 100) {
+      return res.status(400).json({ message: "Minimum withdraw is 100" });
+    }
 
-  if (user.walletBalance < amount) {
-    return res.status(400).json({ message: "Insufficient balance" });
+    const user = await User.findById(req.user.id);
+
+    if (user.walletBalance < amount) {
+      return res.status(400).json({ message: "Insufficient balance" });
+    }
+
+    user.walletBalance -= amount;
+    await user.save();
+
+    await Transaction.create({
+      user: user._id,
+      amount,
+      type: "withdraw",
+      status: "completed"
+    });
+
+    res.json({ message: "Withdraw successful" });
+
+  } catch (err) {
+    res.status(500).json({ message: "Withdraw failed" });
   }
-
-  user.walletBalance -= amount;
-  await user.save();
-
-  res.json({ success: true });
 };
 
-// HISTORY (basic placeholder)
+// ================= HISTORY =================
 exports.history = async (req, res) => {
-  const tx = await Transaction.find({ userId: req.user.id }).sort({ createdAt: -1 });
+  const tx = await Transaction
+    .find({ user: req.user.id })
+    .sort({ createdAt: -1 })
+    .limit(20);
+
   res.json(tx);
 };

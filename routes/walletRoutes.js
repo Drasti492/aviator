@@ -1,17 +1,9 @@
 const router = require("express").Router();
-const walletController = require("../controllers/walletController");
-const auth = require("../middleware/authMiddleware");
+const ctrl = require("../controllers/walletController");
+const auth = require("../middleware/auth");
 
-// GET WALLET
-router.get("/me", auth, walletController.getWallet);
-
-// DEPOSIT
-router.post("/deposit", auth, walletController.deposit);
-
-// WITHDRAW
-router.post("/withdraw", auth, walletController.withdraw);
-
-// HISTORY
-router.get("/history", auth, walletController.history);
+router.get("/me", auth, ctrl.getWallet);
+router.post("/withdraw", auth, ctrl.withdraw);
+router.get("/history", auth, ctrl.history);
 
 module.exports = router;

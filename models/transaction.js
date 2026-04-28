@@ -5,11 +5,14 @@ const transactionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User"
   },
-  phone: String,
   amount: Number,
-  type: String,
+  type: {
+    type: String,
+    enum: ["deposit", "withdraw", "bet", "win"]
+  },
   status: {
     type: String,
+    enum: ["pending", "completed", "failed"],
     default: "pending"
   },
   reference: String
