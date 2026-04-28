@@ -19,7 +19,19 @@ const userSchema = new mongoose.Schema({
     default: 0
   },
 
-  // 🔐 OTP LIMIT SYSTEM
+  // New user bonus flag
+  bonusClaimed: {
+    type: Boolean,
+    default: false
+  },
+
+  // Has ever deposited (for withdrawal eligibility)
+  hasDeposited: {
+    type: Boolean,
+    default: false
+  },
+
+  // OTP rate limiting
   otpAttempts: {
     type: Number,
     default: 0

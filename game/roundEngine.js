@@ -1,116 +1,142 @@
 const { generateCrashPoint } = require("./provablyFair");
 const User = require("../models/user");
 const Bet = require("../models/Bet");
+const GameRound = require("../models/GameRound");
 
 class RoundEngine {
   constructor(io) {
     this.io = io;
 
-    this.state = "WAITING";
+    this.state = "WAITING";   // WAITING | FLYING | CRASHED
     this.countdown = 10;
 
-    this.multiplier = 1;
+    this.multiplier = 1.0;
     this.crashPoint = 0;
+    this.roundId = 0;
 
-    this.players = {}; // socket.id -> bet
+    this.players = {};        // socket.id => { userId, amount, autoCashout, cashed }
 
-    this.startLoops();
+    this.waitInterval = null;
+    this.flyInterval = null;
+
+    this.startWaiting();
   }
 
-  startLoops() {
-    setInterval(() => this.waitingTick(), 1000);
-    setInterval(() => this.flyingTick(), 100);
+  // ===================== WAITING PHASE =====================
+  startWaiting() {
+    this.state = "WAITING";
+    this.countdown = 10;
+    this.players = {};
+
+    this.waitInterval = setInterval(() => this._waitTick(), 1000);
   }
 
-  // ================= WAITING =================
-  waitingTick() {
+  _waitTick() {
     if (this.state !== "WAITING") return;
 
+    this.io.emit("round_waiting", { countdown: this.countdown });
     this.countdown--;
 
-    this.io.emit("round_waiting", {
-      countdown: this.countdown
-    });
-
-    if (this.countdown <= 0) {
-      this.startRound();
+    if (this.countdown < 0) {
+      clearInterval(this.waitInterval);
+      this._startRound();
     }
   }
 
-  // ================= START =================
-  startRound() {
+  // ===================== START ROUND =====================
+  _startRound() {
     this.state = "FLYING";
-    this.multiplier = 1;
-
+    this.multiplier = 1.0;
     this.crashPoint = generateCrashPoint();
+    this.roundId++;
 
-    this.io.emit("round_start", {
-      crashHash: "provably-fair-enabled"
-    });
+    console.log(`🛫 Round ${this.roundId} starting — crash at ${this.crashPoint.toFixed(2)}x`);
+
+    this.io.emit("round_start", { roundId: this.roundId });
+
+    this.flyInterval = setInterval(() => this._flyTick(), 100);
   }
 
-  // ================= FLYING =================
-  async flyingTick() {
+  // ===================== FLYING PHASE =====================
+  _flyTick() {
     if (this.state !== "FLYING") return;
 
-    this.multiplier += 0.02 + this.multiplier * 0.002;
+    // Exponential multiplier growth
+    this.multiplier += 0.015 + this.multiplier * 0.0018;
+    const mult = Math.round(this.multiplier * 100) / 100;
 
-    const currentMult = Number(this.multiplier.toFixed(2));
+    this.io.emit("game_tick", { multiplier: mult });
 
-    this.io.emit("game_tick", {
-      multiplier: currentMult
-    });
-
-    // ===== AUTO CASHOUT =====
-    for (let id in this.players) {
+    // Auto cashouts
+    for (const id in this.players) {
       const p = this.players[id];
-
-      if (!p.cashed && p.autoCashout > 0 && currentMult >= p.autoCashout) {
-        const socket = this.io.sockets.sockets.get(id);
-        if (socket) await this.cashout(socket, p.autoCashout);
+      if (!p.cashed && p.autoCashout > 1 && mult >= p.autoCashout) {
+        const sock = this.io.sockets.sockets.get(id);
+        if (sock) this.cashout(sock, mult).catch(console.error);
       }
     }
 
-    // ===== CRASH =====
-    if (currentMult >= this.crashPoint) {
-      await this.crash();
+    // Crash check
+    if (mult >= this.crashPoint) {
+      clearInterval(this.flyInterval);
+      this._crash();
     }
   }
 
-  // ================= PLACE BET =================
+  // ===================== PLACE BET =====================
   async addBet(socket, { amount, autoCashout }) {
+    if (!socket.user) {
+      return socket.emit("error_msg", "Please login to bet");
+    }
+
     if (this.state !== "WAITING") {
-      socket.emit("error_msg", "Round already started");
-      return;
+      return socket.emit("error_msg", "Round in progress — wait for next round");
     }
 
     if (this.players[socket.id]) {
-      socket.emit("error_msg", "Bet already placed");
-      return;
+      return socket.emit("error_msg", "You already placed a bet this round");
     }
 
-    const user = await User.findById(socket.user.id);
+    const betAmt = Number(amount);
+    const autoCO = Number(autoCashout) || 0;
 
-    if (!user || user.walletBalance < amount) {
-      socket.emit("error_msg", "Insufficient balance");
-      return;
+    if (!betAmt || betAmt < 30) {
+      return socket.emit("error_msg", "Minimum stake is KES 30");
     }
 
-    user.walletBalance -= amount;
-    await user.save();
+    try {
+      const user = await User.findById(socket.user.id);
 
-    this.players[socket.id] = {
-      userId: user._id,
-      amount,
-      autoCashout,
-      cashed: false
-    };
+      if (!user) return socket.emit("error_msg", "Account not found");
 
-    socket.emit("bet_placed", { amount });
+      if (user.walletBalance < betAmt) {
+        return socket.emit("error_msg", `Insufficient balance. Your balance is KES ${Math.floor(user.walletBalance)}`);
+      }
+
+      // Deduct balance
+      user.walletBalance -= betAmt;
+      await user.save();
+
+      this.players[socket.id] = {
+        userId: user._id,
+        amount: betAmt,
+        autoCashout: autoCO,
+        cashed: false,
+        socket
+      };
+
+      socket.emit("bet_placed", { amount: betAmt });
+
+      console.log(`💰 Bet: ${user.name || user.phone} — KES ${betAmt}`);
+
+    } catch (err) {
+      console.error("addBet error:", err);
+      socket.emit("error_msg", "Bet failed. Try again.");
+    }
   }
 
-  // ================= CASHOUT =================
-  async cashout(socket, forcedMultiplier = null) {
+  // ===================== CASHOUT =====================
+  async cashout(socket, forcedMult = null) {
     const p = this.players[socket.id];
 
     if (!p || p.cashed) return;
@@ -118,59 +144,81 @@ class RoundEngine {
 
     p.cashed = true;
 
-    const usedMult = forcedMultiplier || this.multiplier;
+    const usedMult = forcedMult || this.multiplier;
     const payout = Math.floor(p.amount * usedMult);
 
-    const user = await User.findById(p.userId);
-    user.walletBalance += payout;
-    await user.save();
+    try {
+      const user = await User.findById(p.userId);
+      user.walletBalance += payout;
+      await user.save();
 
-    // ✅ SAVE WIN
-    await Bet.create({
-      userId: p.userId,
-      amount: p.amount,
-      multiplier: usedMult,
-      payout,
-      result: "win"
-    });
+      await Bet.create({
+        userId: p.userId,
+        amount: p.amount,
+        multiplier: Number(usedMult.toFixed(2)),
+        payout,
+        result: "win"
+      });
 
-    socket.emit("cashout_success", {
-      multiplier: Number(usedMult.toFixed(2)),
-      payout
-    });
+      socket.emit("cashout_success", {
+        multiplier: Number(usedMult.toFixed(2)),
+        payout
+      });
+
+      console.log(`🏆 Cashout: KES ${payout} at ${usedMult.toFixed(2)}x`);
+
+    } catch (err) {
+      console.error("Cashout error:", err);
+    }
   }
 
-  // ================= CRASH =================
-  async crash() {
+  // ===================== CRASH =====================
+  async _crash() {
     this.state = "CRASHED";
 
-    this.io.emit("round_crash", {
-      crashPoint: this.crashPoint
-    });
+    const crashPt = Number(this.crashPoint.toFixed(2));
 
-    // ===== SAVE LOSSES =====
-    for (let id in this.players) {
-      const p = this.players[id];
+    this.io.emit("round_crash", { crashPoint: crashPt });
 
-      if (!p.cashed) {
-        await Bet.create({
-          userId: p.userId,
-          amount: p.amount,
-          multiplier: this.crashPoint,
-          payout: 0,
-          result: "lose"
-        });
+    console.log(`💥 Crash at ${crashPt}x`);
 
-        const socket = this.io.sockets.sockets.get(id);
-        if (socket) socket.emit("bet_lost");
-      }
+    // Save round to DB
+    try {
+      await GameRound.create({
+        roundId: this.roundId,
+        crashPoint: crashPt
+      });
+    } catch (err) {
+      console.error("GameRound save error:", err);
     }
 
-    // RESET
+    // Mark all uncashed bets as losses
+    const lossPromises = Object.entries(this.players)
+      .filter(([, p]) => !p.cashed)
+      .map(async ([id, p]) => {
+        try {
+          await Bet.create({
+            userId: p.userId,
+            amount: p.amount,
+            multiplier: crashPt,
+            payout: 0,
+            result: "lose"
+          });
+
+          const sock = this.io.sockets.sockets.get(id);
+          if (sock) sock.emit("bet_lost");
+
+          console.log(`❌ Lost: KES ${p.amount}`);
+        } catch (err) {
+          console.error("Loss record error:", err);
+        }
+      });
+
+    await Promise.all(lossPromises);
+
+    // Restart after 5s pause
     setTimeout(() => {
-      this.players = {};
-      this.countdown = 10;
-      this.state = "WAITING";
+      this.startWaiting();
     }, 5000);
   }
 }
