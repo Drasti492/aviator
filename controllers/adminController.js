@@ -1,5 +1,5 @@
 const User = require("../models/user");
-const Payment = require("../models/Payment");
+const Payment = require("../models/payment");
 const axios = require("axios");
 
 // ================= GET PENDING =================
