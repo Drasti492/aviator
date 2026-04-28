@@ -17,6 +17,7 @@ app.use("/api/wallet", require("./routes/walletRoutes"));
 app.use("/api/payment", require("./routes/paymentRoutes"));
 app.use("/api/admin", require("./routes/adminRoutes"));
 app.use("/api/stats", require("./routes/statsRoutes"));
+app.use("/api/bets", require("./routes/betRoutes"));
 
 // DB
 mongoose.connect(process.env.MONGO_URI)
