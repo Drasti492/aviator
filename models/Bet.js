@@ -1,16 +1,14 @@
 const mongoose = require("mongoose");
 
 const betSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  amount: Number,
-  cashoutMultiplier: Number,
-  payout: Number,
-  status: {
-    type: String,
-    enum: ["pending", "won", "lost"],
-    default: "pending"
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User"
   },
-  roundId: String
+  amount: Number,
+  multiplier: Number,
+  result: String, // "win" or "lose"
+  payout: Number
 }, { timestamps: true });
 
 module.exports = mongoose.model("Bet", betSchema);
