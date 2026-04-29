@@ -30,6 +30,10 @@ module.exports = function (server) {
       engine.addBet(socket, data);
     });
 
+    socket.on("cancel_bet", () => {
+      engine.cancelBet(socket);
+    });
+
     socket.on("cashout", () => {
       engine.cashout(socket);
     });
@@ -39,3 +43,5 @@ module.exports = function (server) {
     });
   });
 };
+
+
