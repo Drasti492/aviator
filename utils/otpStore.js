@@ -6,21 +6,21 @@ const WINDOW = 6 * 60 * 60 * 1000; // 6 hours
 
 // ================= SAVE OTP =================
 exports.saveOTP = (phone, code) => {
-  const attempts = attemptStore.get(phone) || { count: 0, start: Date.now() };
+  // Get or create attempt record
+  let attempts = attemptStore.get(phone);
 
-  // reset window after 6 hrs
-  if (Date.now() - attempts.start > WINDOW) {
-    attemptStore.set(phone, { count: 0, start: Date.now() });
+  // First time or window expired — reset
+  if (!attempts || (Date.now() - attempts.start > WINDOW)) {
+    attempts = { count: 0, start: Date.now() };
+    attemptStore.set(phone, attempts);
   }
 
-  const current = attemptStore.get(phone);
-
-  if (current.count >= MAX_ATTEMPTS) {
+  if (attempts.count >= MAX_ATTEMPTS) {
     throw new Error("OTP limit reached. Try again after 6 hours.");
   }
 
-  current.count += 1;
-  attemptStore.set(phone, current);
+  attempts.count += 1;
+  attemptStore.set(phone, attempts);
 
   otpStore.set(phone, {
     code,
