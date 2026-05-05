@@ -1,114 +1,99 @@
+// controllers/authController.js
+// Firebase Phone Auth — replaces Africa's Talking OTP completely
+// No smsService, no otpStore — Firebase handles all OTP delivery
+
 const jwt = require("jsonwebtoken");
 const User = require("../models/user");
-const { saveOTP, verifyOTP } = require("../utils/otpStore");
-const { sendOTP } = require("../utils/smsService");
+const { verifyFirebaseToken } = require("../utils/firebaseAdmin");
 
-// ================= SEND OTP =================
-exports.sendOtp = async (req, res) => {
-  try {
-    const { phone } = req.body;
-
-    if (!phone) return res.status(400).json({ message: "Phone required" });
-
-    let user = await User.findOne({ phone });
-
-    // OTP rate limit: 3 per 3 hours
-    if (user && user.otpAttempts >= 3 && user.otpExpires && user.otpExpires > Date.now()) {
-      return res.status(429).json({
-        message: "Too many OTP requests. Try again later."
-      });
-    }
-
-    // Reset window if expired
-    if (user && (!user.otpExpires || user.otpExpires < Date.now())) {
-      user.otpAttempts = 0;
-    }
-
-    // Generate 6-digit OTP
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-    try {
-      saveOTP(phone, code);
-    } catch (err) {
-      return res.status(429).json({ message: err.message });
-    }
-
-    if (user) {
-      user.otpAttempts = (user.otpAttempts || 0) + 1;
-      user.otpExpires = Date.now() + (3 * 60 * 60 * 1000);
-      await user.save();
-    }
-
-    // Send OTP via Africa's Talking
-    try {
-      await sendOTP(phone, code);
-    } catch (smsErr) {
-      console.error("SMS error:", smsErr.message);
-      // In dev, log OTP to console
-      console.log(` OTP for ${phone}: ${code}`);
-    }
-
-    res.json({ message: "OTP sent" });
-
-  } catch (err) {
-    console.error("sendOtp error:", err);
-    res.status(500).json({ message: "Failed to send OTP" });
-  }
-};
-
-// ================= REGISTER =================
+// ================================================================
+// REGISTER
+// Flow: Frontend sends OTP via Firebase → user enters code →
+//       Firebase returns ID token → frontend sends token here →
+//       we verify token → create account
+// ================================================================
 exports.register = async (req, res) => {
   try {
-    const { phone, otp, name, pin } = req.body;
+    const { phone, name, pin, firebaseIdToken } = req.body;
 
-    if (!phone || !otp || !name || !pin) {
-      return res.status(400).json({ message: "All fields required" });
-    }
-
-    if (!verifyOTP(phone, otp)) {
-      return res.status(400).json({ message: "Invalid or expired OTP" });
-    }
+    // Validate inputs
+    if (!phone)           return res.status(400).json({ message: "Phone number required" });
+    if (!name)            return res.status(400).json({ message: "Name required" });
+    if (!pin)             return res.status(400).json({ message: "PIN required" });
+    if (!firebaseIdToken) return res.status(400).json({ message: "Phone verification required" });
 
     if (pin.length !== 4 || !/^\d{4}$/.test(pin)) {
-      return res.status(400).json({ message: "PIN must be 4 digits" });
+      return res.status(400).json({ message: "PIN must be exactly 4 digits" });
     }
 
-    let user = await User.findOne({ phone });
+    // Verify Firebase ID token — proves user received and confirmed OTP
+    let decoded;
+    try {
+      decoded = await verifyFirebaseToken(firebaseIdToken);
+    } catch (fbErr) {
+      console.error("Firebase verify failed:", fbErr.message);
+      return res.status(401).json({ message: "Phone verification failed. Please verify your number again." });
+    }
+
+    // Firebase gives phone as +254XXXXXXXXX — our DB stores as 254XXXXXXXXX
+    const firebasePhone = (decoded.phone_number || "").replace(/^\+/, "");
+    const submittedPhone = phone.replace(/^\+/, "");
+
+    // Security: ensure the verified phone matches what was submitted
+    if (firebasePhone !== submittedPhone) {
+      console.warn(`Phone mismatch: firebase=${firebasePhone} submitted=${submittedPhone}`);
+      return res.status(401).json({ message: "Phone number does not match verification. Please try again." });
+    }
 
     const SIGNUP_BONUS = 30;
+    let user = await User.findOne({ phone: submittedPhone });
 
     if (user && user.bonusClaimed) {
-      // Already registered properly — just update name/pin
+      // Already registered — update name and PIN only
       user.name = name;
-      user.pin = pin;
+      user.pin  = pin;
       await user.save();
+      console.log(`🔄 Account updated: ${submittedPhone}`);
     } else if (user) {
-      user.name = name;
-      user.pin = pin;
+      // Exists but bonus not claimed
+      user.name          = name;
+      user.pin           = pin;
       user.walletBalance += SIGNUP_BONUS;
-      user.bonusClaimed = true;
+      user.bonusClaimed  = true;
       await user.save();
+      console.log(`🎁 Bonus claimed: ${submittedPhone}`);
     } else {
+      // New user
       user = await User.create({
-        phone,
+        phone:         submittedPhone,
         name,
         pin,
         walletBalance: SIGNUP_BONUS,
-        bonusClaimed: true
+        bonusClaimed:  true
       });
+      console.log(`🆕 New user: ${name} (${submittedPhone}) — KES ${SIGNUP_BONUS} bonus`);
     }
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
-    res.json({ token, user: { name: user.name, phone: user.phone, walletBalance: user.walletBalance } });
+    res.json({
+      token,
+      user: {
+        name:          user.name,
+        phone:         user.phone,
+        walletBalance: user.walletBalance
+      }
+    });
 
   } catch (err) {
-    console.error("Register error:", err);
-    res.status(500).json({ message: "Registration failed" });
+    console.error("Register error:", err.message);
+    res.status(500).json({ message: "Registration failed. Please try again." });
   }
 };
 
-// ================= LOGIN =================
+// ================================================================
+// LOGIN — phone + PIN only, no OTP needed for login
+// ================================================================
 exports.login = async (req, res) => {
   try {
     const { phone, pin } = req.body;
@@ -117,57 +102,90 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: "Phone and PIN required" });
     }
 
-    const user = await User.findOne({ phone });
+    const cleanPhone = phone.replace(/^\+/, "");
+    const user = await User.findOne({ phone: cleanPhone });
 
     if (!user) {
-      return res.status(400).json({ message: "Account not found" });
+      return res.status(400).json({ message: "Account not found. Please sign up first." });
     }
 
     if (user.pin !== pin) {
-      return res.status(400).json({ message: "Invalid PIN" });
+      return res.status(400).json({ message: "Incorrect PIN. Try again." });
     }
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
+    console.log(`🔐 Login: ${user.name || cleanPhone}`);
+
     res.json({
       token,
-      user: { name: user.name, phone: user.phone, walletBalance: user.walletBalance }
+      user: {
+        name:          user.name,
+        phone:         user.phone,
+        walletBalance: user.walletBalance
+      }
     });
 
   } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ message: "Login failed" });
+    console.error("Login error:", err.message);
+    res.status(500).json({ message: "Login failed. Please try again." });
   }
 };
 
-// ================= RESET PIN =================
+// ================================================================
+// RESET PIN — verify Firebase token → update PIN
+// ================================================================
 exports.resetPin = async (req, res) => {
   try {
-    const { phone, otp, newPin } = req.body;
+    const { phone, newPin, firebaseIdToken } = req.body;
 
-    if (!phone || !otp || !newPin) {
-      return res.status(400).json({ message: "All fields required" });
-    }
-
-    if (!verifyOTP(phone, otp)) {
-      return res.status(400).json({ message: "Invalid or expired OTP" });
-    }
+    if (!phone)           return res.status(400).json({ message: "Phone required" });
+    if (!newPin)          return res.status(400).json({ message: "New PIN required" });
+    if (!firebaseIdToken) return res.status(400).json({ message: "Phone verification required" });
 
     if (newPin.length !== 4 || !/^\d{4}$/.test(newPin)) {
-      return res.status(400).json({ message: "PIN must be 4 digits" });
+      return res.status(400).json({ message: "PIN must be exactly 4 digits" });
     }
 
-    const user = await User.findOne({ phone });
+    // Verify Firebase token
+    let decoded;
+    try {
+      decoded = await verifyFirebaseToken(firebaseIdToken);
+    } catch (fbErr) {
+      console.error("Firebase verify failed:", fbErr.message);
+      return res.status(401).json({ message: "Phone verification failed. Please verify again." });
+    }
 
-    if (!user) return res.status(404).json({ message: "Account not found" });
+    const firebasePhone  = (decoded.phone_number || "").replace(/^\+/, "");
+    const submittedPhone = phone.replace(/^\+/, "");
+
+    if (firebasePhone !== submittedPhone) {
+      return res.status(401).json({ message: "Phone number mismatch." });
+    }
+
+    const user = await User.findOne({ phone: submittedPhone });
+    if (!user) {
+      return res.status(404).json({ message: "Account not found." });
+    }
 
     user.pin = newPin;
     await user.save();
 
-    res.json({ message: "PIN reset successful" });
+    console.log(`🔑 PIN reset: ${submittedPhone}`);
+    res.json({ message: "PIN reset successful. Please sign in." });
 
   } catch (err) {
-    console.error("Reset error:", err);
-    res.status(500).json({ message: "Reset failed" });
+    console.error("Reset PIN error:", err.message);
+    res.status(500).json({ message: "PIN reset failed. Please try again." });
   }
+};
+
+// ================================================================
+// SEND OTP — kept for compatibility but no longer used
+// Firebase handles OTP on the frontend now
+// ================================================================
+exports.sendOtp = async (req, res) => {
+  res.json({
+    message: "OTP is now handled by Firebase on the frontend. No server OTP needed."
+  });
 };

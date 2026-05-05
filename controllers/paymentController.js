@@ -3,7 +3,7 @@ const User = require("../models/user");
 const Payment = require("../models/payment");
 const Transaction = require("../models/transaction");
 
-// ================= STK PUSH =================
+//  STK PUSH 
 exports.stkPush = async (req, res) => {
   try {
     const { phone, amount } = req.body;
@@ -68,7 +68,7 @@ exports.stkPush = async (req, res) => {
   }
 };
 
-// ================= CHECK STATUS (polling) =================
+//  CHECK STATUS (polling) 
 exports.checkStatus = async (req, res) => {
   try {
     const { reference } = req.params;
@@ -87,7 +87,7 @@ exports.checkStatus = async (req, res) => {
   }
 };
 
-// ================= PAYHERO CALLBACK =================
+//  PAYHERO CALLBACK 
 exports.payheroCallback = async (req, res) => {
   try {
     const body = req.body;

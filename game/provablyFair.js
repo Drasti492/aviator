@@ -16,7 +16,6 @@ function generateCrashPoint() {
   hmac.update(nonce.toString());
 
   const hash = hmac.digest("hex");
-
   const int = parseInt(hash.slice(0, 13), 16);
   const crash = Math.max(1, (100 / (int % 100)) );
 

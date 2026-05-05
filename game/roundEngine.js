@@ -24,7 +24,7 @@ class RoundEngine {
     this.players = {};
     this.crashPoint = generateCrashPoint();
     this.roundId++;
-    console.log(`⏳ Round ${this.roundId} — crash at ${this.crashPoint.toFixed(2)}x`);
+    console.log(` Round ${this.roundId} — crash at ${this.crashPoint.toFixed(2)}x`);
     this.io.emit("crash_history", { history: this.crashHistory });
     this.waitInterval = setInterval(() => this._waitTick(), 1000);
   }
@@ -133,7 +133,7 @@ class RoundEngine {
       user.walletBalance += p.amount;
       await user.save();
       socket.emit("bet_cancelled", { amount: p.amount });
-      console.log(`🚫 Cancelled — KES ${p.amount} refunded`);
+      console.log(` Cancelled — KES ${p.amount} refunded`);
     } catch (err) {
       this.players[socket.id] = p; // restore on failure
       console.error("cancelBet error:", err.message);

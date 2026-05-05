@@ -18,7 +18,7 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-
+  
   // New user bonus flag
   bonusClaimed: {
     type: Boolean,

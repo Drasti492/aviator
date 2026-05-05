@@ -4,7 +4,7 @@ const router = express.Router();
 const Bet = require("../models/Bet");
 const auth = require("../middleware/auth"); // your JWT middleware
 
-// ================= MY BET HISTORY =================
+// MY BET HISTORY 
 router.get("/my", auth, async (req, res) => {
   try {
     const bets = await Bet.find({ userId: req.user.id })
