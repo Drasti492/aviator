@@ -1,6 +1,12 @@
 const jwt  = require("jsonwebtoken");
 const User = require("../models/user");
 
+// Crash immediately on startup if JWT_SECRET missing — better than silent failures
+if (!process.env.JWT_SECRET) {
+  console.error("❌ FATAL: JWT_SECRET environment variable is not set!");
+  process.exit(1);
+}
+
 function validateKenyanPhone(phone) {
   if (!/^254(7\d{8}|1\d{8})$/.test(phone)) return false;
   const digits = phone.slice(3);
@@ -30,19 +36,18 @@ function validateKenyanPhone(phone) {
 // ================================================================
 exports.register = async (req, res) => {
   try {
-    let { phone, name, pin } = req.body;
+    const { phone, name, pin } = req.body;
 
-    // Basic presence checks
     if (!phone) return res.status(400).json({ message: "Phone number required" });
     if (!name || name.trim().length < 2)
       return res.status(400).json({ message: "Enter your full name (at least 2 characters)" });
     if (!pin) return res.status(400).json({ message: "PIN required" });
 
-    // PIN validation
     if (!/^\d{4}$/.test(pin))
       return res.status(400).json({ message: "PIN must be exactly 4 digits" });
     if (/^(\d)\1{3}$/.test(pin))
       return res.status(400).json({ message: "PIN too simple — avoid repeated digits like 1111" });
+
     const pd = pin.split("").map(Number);
     let pa = true, pde = true;
     for (let i = 1; i < 4; i++) {
@@ -52,16 +57,20 @@ exports.register = async (req, res) => {
     if (pa || pde)
       return res.status(400).json({ message: "PIN too simple — avoid sequences like 1234" });
 
-    // Phone format
     const cleanPhone = phone.toString().replace(/^\+/, "").trim();
     if (!validateKenyanPhone(cleanPhone))
       return res.status(400).json({ message: "Enter a valid Kenyan phone number (07XX or 01XX)" });
 
-    // Check duplicate — explicit log so you can see it in Render logs
+    // Check duplicate
     const existing = await User.findOne({ phone: cleanPhone });
     console.log(`🔍 Duplicate check for ${cleanPhone}:`, existing ? "FOUND" : "not found");
-    if (existing)
-      return res.status(409).json({ message: "An account with this number already exists. Please sign in." });
+
+    if (existing) {
+      // If user exists but has no token (JWT was broken before), let them log in normally
+      return res.status(409).json({ 
+        message: "An account with this number already exists. Please sign in." 
+      });
+    }
 
     const BONUS = 30;
     const user  = await User.create({
@@ -69,13 +78,16 @@ exports.register = async (req, res) => {
       name:          name.trim(),
       pin,
       walletBalance: BONUS,
-      bonusBalance:  BONUS,   // track bonus separately
+      bonusBalance:  BONUS,
       bonusClaimed:  true
     });
 
     console.log(`🆕 Saved to MongoDB: ${user.name} (${user.phone}) id=${user._id}`);
 
+    // This line was crashing because JWT_SECRET was undefined
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+    console.log(`✅ Token issued for ${user.phone}`);
 
     return res.status(201).json({
       token,
@@ -83,7 +95,6 @@ exports.register = async (req, res) => {
     });
 
   } catch (err) {
-    // Mongoose duplicate key error
     if (err.code === 11000) {
       return res.status(409).json({ message: "An account with this number already exists. Please sign in." });
     }
@@ -97,7 +108,7 @@ exports.register = async (req, res) => {
 // ================================================================
 exports.login = async (req, res) => {
   try {
-    let { phone, pin } = req.body;
+    const { phone, pin } = req.body;
 
     if (!phone || !pin)
       return res.status(400).json({ message: "Phone and PIN required" });
@@ -107,7 +118,6 @@ exports.login = async (req, res) => {
     if (!/^254(7\d{8}|1\d{8})$/.test(cleanPhone))
       return res.status(400).json({ message: "Invalid phone number format" });
 
-    // MUST use .select("+pin") because we set select:false on pin
     const user = await User.findOne({ phone: cleanPhone }).select("+pin");
     console.log(`🔐 Login attempt: ${cleanPhone} — user found: ${!!user}`);
 
@@ -118,6 +128,8 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: "Incorrect PIN. Please try again." });
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+    console.log(`✅ Login success: ${user.phone}`);
 
     return res.json({
       token,
@@ -135,7 +147,7 @@ exports.login = async (req, res) => {
 // ================================================================
 exports.resetPin = async (req, res) => {
   try {
-    let { phone, newPin } = req.body;
+    const { phone, newPin } = req.body;
 
     if (!phone)  return res.status(400).json({ message: "Phone required" });
     if (!newPin) return res.status(400).json({ message: "New PIN required" });
@@ -143,6 +155,7 @@ exports.resetPin = async (req, res) => {
       return res.status(400).json({ message: "PIN must be exactly 4 digits" });
     if (/^(\d)\1{3}$/.test(newPin))
       return res.status(400).json({ message: "PIN too simple" });
+
     const pd = newPin.split("").map(Number);
     let a = true, d = true;
     for (let i = 1; i < 4; i++) {
