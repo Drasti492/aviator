@@ -6,7 +6,32 @@ const cors = require("cors");
 
 const app = express();
 
+// At the top, replace:
 app.use(cors({ origin: "*" }));
+
+// With this:
+const allowedOrigins = [
+  "https://aviatrix-lemon.vercel.app",
+  "http://localhost:3000",
+  "http://127.0.0.1:5500"  // if you test locally with Live Server
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
+}));
+
+// Also add this line BEFORE your routes to handle preflight:
+app.options("*", cors());
+
 app.use(express.json());
 
 // ===================== ROUTES =====================

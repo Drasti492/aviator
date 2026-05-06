@@ -2,9 +2,17 @@ const jwt = require("jsonwebtoken");
 const RoundEngine = require("./game/roundEngine");
 
 module.exports = function (server) {
-  const io = require("socket.io")(server, {
-    cors: { origin: "*" }
-  });
+const io = require("socket.io")(server, {
+  cors: {
+    origin: [
+      "https://aviatrix-lemon.vercel.app",
+      "http://localhost:3000",
+      "http://127.0.0.1:5500"
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
 
   const engine = new RoundEngine(io);
 
