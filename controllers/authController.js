@@ -1,33 +1,16 @@
-// controllers/authController.js
-// No OTP — phone number confirmed by double-entry on frontend
-// Anti-spam: strict Kenyan phone format validation server-side
-
 const jwt  = require("jsonwebtoken");
 const User = require("../models/user");
 
-// ================================================================
-// PHONE VALIDATION — strict Kenyan numbers only
-// Blocks: sequential (07123456789), repeated (07111111111),
-//         known test patterns (0700000000, 0799999999 etc.)
-// ================================================================
 function validateKenyanPhone(phone) {
-  // Must be exactly 254 + 9 digits (Kenyan format)
   if (!/^254(7\d{8}|1\d{8})$/.test(phone)) return false;
-
-  const digits = phone.slice(3); // last 9 digits after 254
-
-  // Block all-same digit: 000000000, 111111111 ...
+  const digits = phone.slice(3);
   if (/^(\d)\1{8}$/.test(digits)) return false;
-
-  // Block sequential ascending: 123456789
   let ascending = true, descending = true;
   for (let i = 1; i < digits.length; i++) {
     if (Number(digits[i]) !== Number(digits[i-1]) + 1) ascending  = false;
     if (Number(digits[i]) !== Number(digits[i-1]) - 1) descending = false;
   }
   if (ascending || descending) return false;
-
-  // Block known dummy prefixes: 0700000, 0799999, 0712345, 0798765
   const known = [
     "700000000","700000001","711111111","722222222","733333333",
     "744444444","755555555","766666666","777777777","788888888",
@@ -37,13 +20,8 @@ function validateKenyanPhone(phone) {
     "110000000","700123456","712300000","700111222"
   ];
   if (known.includes(digits)) return false;
-
-  // Block if more than 5 consecutive same digits anywhere
   if (/(\d)\1{5,}/.test(digits)) return false;
-
-  // Block first 5 digits all same
   if (/^(\d)\1{4}/.test(digits)) return false;
-
   return true;
 }
 
@@ -52,35 +30,36 @@ function validateKenyanPhone(phone) {
 // ================================================================
 exports.register = async (req, res) => {
   try {
-    const { phone, name, pin } = req.body;
+    let { phone, name, pin } = req.body;
 
+    // Basic presence checks
     if (!phone) return res.status(400).json({ message: "Phone number required" });
-    if (!name  || name.trim().length < 2)
+    if (!name || name.trim().length < 2)
       return res.status(400).json({ message: "Enter your full name (at least 2 characters)" });
-    if (!pin)  return res.status(400).json({ message: "PIN required" });
+    if (!pin) return res.status(400).json({ message: "PIN required" });
 
+    // PIN validation
     if (!/^\d{4}$/.test(pin))
       return res.status(400).json({ message: "PIN must be exactly 4 digits" });
-
-    // Block sequential PINs: 1234, 2345, 9876 etc.
-    const pinDigits = pin.split("").map(Number);
-    let pinAsc = true, pinDesc = true;
-    for (let i = 1; i < 4; i++) {
-      if (pinDigits[i] !== pinDigits[i-1] + 1) pinAsc  = false;
-      if (pinDigits[i] !== pinDigits[i-1] - 1) pinDesc = false;
-    }
-    if (pinAsc || pinDesc)
-      return res.status(400).json({ message: "PIN too simple — avoid sequences like 1234 or 9876" });
-
-    // Block all-same PIN: 0000, 1111 ...
     if (/^(\d)\1{3}$/.test(pin))
       return res.status(400).json({ message: "PIN too simple — avoid repeated digits like 1111" });
+    const pd = pin.split("").map(Number);
+    let pa = true, pde = true;
+    for (let i = 1; i < 4; i++) {
+      if (pd[i] !== pd[i-1]+1) pa  = false;
+      if (pd[i] !== pd[i-1]-1) pde = false;
+    }
+    if (pa || pde)
+      return res.status(400).json({ message: "PIN too simple — avoid sequences like 1234" });
 
-    const cleanPhone = phone.replace(/^\+/, "");
+    // Phone format
+    const cleanPhone = phone.toString().replace(/^\+/, "").trim();
     if (!validateKenyanPhone(cleanPhone))
       return res.status(400).json({ message: "Enter a valid Kenyan phone number (07XX or 01XX)" });
 
+    // Check duplicate — explicit log so you can see it in Render logs
     const existing = await User.findOne({ phone: cleanPhone });
+    console.log(`🔍 Duplicate check for ${cleanPhone}:`, existing ? "FOUND" : "not found");
     if (existing)
       return res.status(409).json({ message: "An account with this number already exists. Please sign in." });
 
@@ -90,21 +69,26 @@ exports.register = async (req, res) => {
       name:          name.trim(),
       pin,
       walletBalance: BONUS,
+      bonusBalance:  BONUS,   // track bonus separately
       bonusClaimed:  true
     });
 
+    console.log(`🆕 Saved to MongoDB: ${user.name} (${user.phone}) id=${user._id}`);
+
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
-    console.log(`🆕 Registered: ${user.name} (${cleanPhone}) — KES ${BONUS} bonus`);
-
-    res.json({
+    return res.status(201).json({
       token,
       user: { name: user.name, phone: user.phone, walletBalance: user.walletBalance }
     });
 
   } catch (err) {
+    // Mongoose duplicate key error
+    if (err.code === 11000) {
+      return res.status(409).json({ message: "An account with this number already exists. Please sign in." });
+    }
     console.error("Register error:", err.message);
-    res.status(500).json({ message: "Registration failed. Please try again." });
+    return res.status(500).json({ message: "Registration failed. Please try again." });
   }
 };
 
@@ -113,18 +97,19 @@ exports.register = async (req, res) => {
 // ================================================================
 exports.login = async (req, res) => {
   try {
-    const { phone, pin } = req.body;
+    let { phone, pin } = req.body;
 
     if (!phone || !pin)
       return res.status(400).json({ message: "Phone and PIN required" });
 
-    const cleanPhone = phone.replace(/^\+/, "");
+    const cleanPhone = phone.toString().replace(/^\+/, "").trim();
 
-    // Still validate format on login to avoid DB pollution
     if (!/^254(7\d{8}|1\d{8})$/.test(cleanPhone))
       return res.status(400).json({ message: "Invalid phone number format" });
 
-    const user = await User.findOne({ phone: cleanPhone });
+    // MUST use .select("+pin") because we set select:false on pin
+    const user = await User.findOne({ phone: cleanPhone }).select("+pin");
+    console.log(`🔐 Login attempt: ${cleanPhone} — user found: ${!!user}`);
 
     if (!user)
       return res.status(400).json({ message: "No account found. Please sign up first." });
@@ -134,49 +119,41 @@ exports.login = async (req, res) => {
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
-    console.log(`🔐 Login: ${user.name || cleanPhone}`);
-
-    res.json({
+    return res.json({
       token,
       user: { name: user.name, phone: user.phone, walletBalance: user.walletBalance }
     });
 
   } catch (err) {
     console.error("Login error:", err.message);
-    res.status(500).json({ message: "Login failed. Please try again." });
+    return res.status(500).json({ message: "Login failed. Please try again." });
   }
 };
 
 // ================================================================
-// RESET PIN — no OTP, just re-verify phone exists + new PIN
-// User must know their phone number; no proof of ownership beyond that.
-// Upgrade this to OTP later when billing is sorted.
+// RESET PIN
 // ================================================================
 exports.resetPin = async (req, res) => {
   try {
-    const { phone, newPin } = req.body;
+    let { phone, newPin } = req.body;
 
     if (!phone)  return res.status(400).json({ message: "Phone required" });
     if (!newPin) return res.status(400).json({ message: "New PIN required" });
-
     if (!/^\d{4}$/.test(newPin))
       return res.status(400).json({ message: "PIN must be exactly 4 digits" });
-
     if (/^(\d)\1{3}$/.test(newPin))
       return res.status(400).json({ message: "PIN too simple" });
-
-    const pinDigits = newPin.split("").map(Number);
-    let asc = true, desc = true;
+    const pd = newPin.split("").map(Number);
+    let a = true, d = true;
     for (let i = 1; i < 4; i++) {
-      if (pinDigits[i] !== pinDigits[i-1] + 1) asc  = false;
-      if (pinDigits[i] !== pinDigits[i-1] - 1) desc = false;
+      if (pd[i] !== pd[i-1]+1) a = false;
+      if (pd[i] !== pd[i-1]-1) d = false;
     }
-    if (asc || desc)
+    if (a || d)
       return res.status(400).json({ message: "PIN too simple — avoid sequences" });
 
-    const cleanPhone = phone.replace(/^\+/, "");
+    const cleanPhone = phone.toString().replace(/^\+/, "").trim();
     const user = await User.findOne({ phone: cleanPhone });
-
     if (!user)
       return res.status(404).json({ message: "No account found with that number." });
 
@@ -184,15 +161,14 @@ exports.resetPin = async (req, res) => {
     await user.save();
 
     console.log(`🔑 PIN reset: ${cleanPhone}`);
-    res.json({ message: "PIN reset successful. Please sign in." });
+    return res.json({ message: "PIN reset successful. Please sign in." });
 
   } catch (err) {
     console.error("Reset PIN error:", err.message);
-    res.status(500).json({ message: "PIN reset failed. Please try again." });
+    return res.status(500).json({ message: "PIN reset failed. Please try again." });
   }
 };
 
-// Legacy stub — kept so old clients don't 404
 exports.sendOtp = async (req, res) => {
-  res.json({ message: "OTP not required. Use register or login directly." });
+  res.json({ message: "OTP not required." });
 };
