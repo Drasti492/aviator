@@ -1,30 +1,31 @@
 const jwt = require("jsonwebtoken");
 const RoundEngine = require("./game/roundEngine");
 
-module.exports = function (server) {
-const io = require("socket.io")(server, {
-  cors: {
-    origin: [
-      "https://aviatrix-lemon.vercel.app",
-      "http://localhost:3000",
-      "http://127.0.0.1:5500"
-    ],
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
+module.exports = function (server, app) {  // accept app param
+  const io = require("socket.io")(server, {
+    cors: {
+      origin: [
+        "https://aviatrix-lemon.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:5500",
+        "https://your-predictor-site.vercel.app"
+      ],
+      methods: ["GET", "POST"],
+      credentials: true
+    }
+  });
 
   const engine = new RoundEngine(io);
+
+  // NEW — store engine on app so any route can access it
+  if (app) app.set("gameEngine", engine);
 
   io.use((socket, next) => {
     try {
       const token = socket.handshake.auth.token;
-
       if (!token) return next();
-
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.user = { id: decoded.id };
-
       next();
     } catch {
       next();
@@ -33,23 +34,11 @@ const io = require("socket.io")(server, {
 
   io.on("connection", (socket) => {
     console.log("🟢 Connected:", socket.id);
-
-    socket.on("place_bet", (data) => {
-      engine.addBet(socket, data);
-    });
-
-    socket.on("cancel_bet", () => {
-      engine.cancelBet(socket);
-    });
-
-    socket.on("cashout", () => {
-      engine.cashout(socket);
-    });
-
-    socket.on("disconnect", () => {
-      console.log("🔴 Disconnected:", socket.id);
-    });
+    socket.on("place_bet",  (data) => engine.addBet(socket, data));
+    socket.on("cancel_bet", ()     => engine.cancelBet(socket));
+    socket.on("cashout",    ()     => engine.cashout(socket));
+    socket.on("disconnect", ()     => console.log("🔴 Disconnected:", socket.id));
   });
+
+  return engine; // NEW
 };
-
-

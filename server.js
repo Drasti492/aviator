@@ -1,61 +1,52 @@
 require("dotenv").config();
-const express = require("express");
-const http = require("http");
+const express  = require("express");
+const http     = require("http");
 const mongoose = require("mongoose");
-const cors = require("cors");
+const cors     = require("cors");
 
 const app = express();
 
-// At the top, replace:
-app.use(cors({ origin: "*" }));
-
-// With this:
 const allowedOrigins = [
   "https://aviatrix-lemon.vercel.app",
   "http://localhost:3000",
-  "http://127.0.0.1:5500"  // if you test locally with Live Server
+  "http://127.0.0.1:5500",
+  "https://your-predictor-site.vercel.app"  // NEW — add your predictor URL here
 ];
 
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
+  origin: function(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+    else callback(new Error("Not allowed by CORS"));
   },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  methods: ["GET","POST","PUT","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"],
   credentials: true
 }));
-
-// Also add this line BEFORE your routes to handle preflight:
 app.options("*", cors());
-
 app.use(express.json());
 
-// ===================== ROUTES =====================
-app.use("/api/auth", require("./routes/authRoutes"));
-app.use("/api/game", require("./routes/gameRoutes"));
-app.use("/api/wallet", require("./routes/walletRoutes"));
-app.use("/api/payment", require("./routes/paymentRoutes"));
-app.use("/api/admin", require("./routes/adminRoutes"));
-app.use("/api/stats", require("./routes/statsRoutes"));
-app.use("/api/bets", require("./routes/betRoutes"));
+app.get("/health", (req, res) => res.json({ status: "ok", db: mongoose.connection.readyState }));
 
-// ===================== DATABASE =====================
+app.use("/api/auth",      require("./routes/authRoutes"));
+app.use("/api/game",      require("./routes/gameRoutes"));
+app.use("/api/wallet",    require("./routes/walletRoutes"));
+app.use("/api/payment",   require("./routes/paymentRoutes"));
+app.use("/api/admin",     require("./routes/adminRoutes"));
+app.use("/api/stats",     require("./routes/statsRoutes"));
+app.use("/api/bets",      require("./routes/betRoutes"));
+app.use("/api/predictor", require("./routes/predictorRoutes")); // NEW
+
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
-  .catch(err => {
-    console.error("❌ MongoDB error:", err.message);
-    process.exit(1);
-  });
+  .catch(err => { console.error("❌ MongoDB FAILED:", err.message); process.exit(1); });
 
-// ===================== HTTP + SOCKET =====================
+mongoose.connection.on("error", err => console.error("❌ MongoDB runtime error:", err.message));
+
 const server = http.createServer(app);
-require("./socket")(server);
+
+// NEW — store engine on app so predictorRoutes can access it
+const initSocket = require("./socket");
+const engine = initSocket(server, app);  // pass app
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Aviator server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
