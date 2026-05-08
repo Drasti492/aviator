@@ -40,5 +40,5 @@ module.exports = function (server, app) {  // accept app param
     socket.on("disconnect", ()     => console.log("🔴 Disconnected:", socket.id));
   });
 
-  return engine; // NEW
+  return engine; 
 };
