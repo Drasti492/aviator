@@ -10,8 +10,8 @@ exports.stkPush = async (req, res) => {
     const { phone, amount } = req.body;
 
     if (!phone) return res.status(400).json({ message: "Phone required" });
-    if (!amount || amount < 100)
-      return res.status(400).json({ message: "Minimum deposit is KES 100" });
+    if (!amount || amount < 200)
+      return res.status(400).json({ message: "Minimum deposit is KES 200" });
 
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
